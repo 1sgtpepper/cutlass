@@ -28,7 +28,7 @@ void check(cutlass::Status status) {
   }
 }
 
-template<int TileM, int GranM, int GranN, int Stages>
+template<int TileM, int GranM, int GranN, int ExtraCarveout>
 struct Configuration {
   using FP8 = cutlass::float_e4m3_t;
   using Tile = Shape<Int<TileM>, _128, _128>;
@@ -45,7 +45,8 @@ struct Configuration {
       cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
       FP8, tuple<cutlass::layout::RowMajor, typename Scale::LayoutSFA>, 16,
       FP8, tuple<cutlass::layout::ColumnMajor, typename Scale::LayoutSFB>, 16,
-      float, Tile, Cluster, cutlass::gemm::collective::StageCount<Stages>,
+      float, Tile, Cluster,
+      cutlass::gemm::collective::StageCountAutoCarveout<sizeof(typename Epilogue::SharedStorage) + ExtraCarveout>,
       cutlass::gemm::KernelTmaWarpSpecializedCooperativeFP8Blockwise>::CollectiveOp;
   using Kernel = cutlass::gemm::kernel::GemmUniversal<
       Shape<int, int, int, int>, Mainloop, Epilogue>;
@@ -55,7 +56,7 @@ struct Configuration {
 // Observe the actual mainloop types without executing a GPU kernel.
 // This diagnostic is separate from numerical confirmation.
 int inspect_layouts() {
-  using Config = Configuration<256, 128, 64, 2>;
+  using Config = Configuration<256, 128, 64, 0>;
   using Mainloop = Config::Mainloop;
   using SmemB = Mainloop::SmemLayoutSFB;
   std::vector<float> storage(cosize(SmemB{}), 1.0f);
@@ -96,11 +97,11 @@ int inspect_layouts() {
   return aliased_threads == int(size(mma)) ? 0 : 1;
 }
 
-template<int TileM = 256, int GranM = 128, int GranN = 64, int Stages = 2>
+template<int TileM = 256, int GranM = 128, int GranN = 64, int ExtraCarveout = 0>
 bool run_case(char const* name, int M, int N, int K, int L = 1,
               bool unit_a = false, bool padded = false,
               float alpha = 1.0f, float beta = 0.0f) {
-  using Config = Configuration<TileM, GranM, GranN, Stages>;
+  using Config = Configuration<TileM, GranM, GranN, ExtraCarveout>;
   using Gemm = typename Config::Gemm;
   using Kernel = typename Config::Kernel;
   using FP8 = typename Config::FP8;
@@ -174,7 +175,8 @@ bool run_case(char const* name, int M, int N, int K, int L = 1,
     }
   }
   std::printf("%s tile=%dx128x128 scale=%dx%dx128 stages=%d problem=%dx%dx%dx%d mismatches=%d %s\n",
-      name, TileM, GranM, GranN, Stages, M, N, K, L, mismatches, mismatches ? "FAIL" : "PASS");
+      name, TileM, GranM, GranN, Config::Mainloop::DispatchPolicy::Stages,
+      M, N, K, L, mismatches, mismatches ? "FAIL" : "PASS");
   return mismatches == 0;
 }
 
@@ -196,14 +198,14 @@ int main(int argc, char** argv) {
   }
   bool okay = run_case("minimal", 256, 128, 128);
   if (all) {
-    okay &= run_case<128,128,64,2>("one-wave", 256, 128, 128);
-    okay &= run_case<256,128,128,2>("one-B-scale", 256, 128, 128);
-    okay &= run_case<256,64,64,2>("two-A-scales-per-wave", 256, 128, 128);
+    okay &= run_case<128,128,64>("one-wave", 256, 128, 128);
+    okay &= run_case<256,128,128>("one-B-scale", 256, 128, 128);
+    okay &= run_case<256,64,64>("two-A-scales-per-wave", 256, 128, 128);
     okay &= run_case("unit-A-scales", 256, 128, 128, 1, true);
     okay &= run_case("steady-state", 256, 128, 256);
     okay &= run_case("stage-wrap", 256, 128, 512);
     okay &= run_case("partial-K", 256, 128, 656);
-    okay &= run_case<256,128,64,3>("three-stages", 256, 128, 656);
+    okay &= run_case<256,128,64,65536>("extra-carveout", 256, 128, 656);
     okay &= run_case("partial-MN-strided-epilogue-batched", 192, 80, 144, 2, false, true, 0.5f, 2.0f);
   }
   return okay ? 0 : 1;

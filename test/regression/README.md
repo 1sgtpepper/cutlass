@@ -8,9 +8,9 @@ The audited baseline is `59e3a3338d516ca6ce0e073af8da65289678a35c`.
 Build with CUDA13.1.1 from the repository root:
 
 ```sh
-nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr -arch=sm_90a \
+nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr -gencode=arch=compute_90a,code=sm_90a \
   -Iinclude -Itools/util/include test/regression/fp8_scale_wave.cu -o fp8_scale_wave
-nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr -arch=sm_100a \
+nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr -gencode=arch=compute_100a,code=sm_100a \
   -Iinclude -Itools/util/include -Iexamples/93_blackwell_low_latency_gqa \
   test/regression/gqa_max_scratch.cu -o gqa_max_scratch
 ```
@@ -27,7 +27,7 @@ revisions are pinned in `.github/workflows/kernel-correctness.yml`.
 ./fp8_scale_wave --all      # Opposite branches and tile/stage/addressing boundaries
 ```
 
-The minimal GEMM uses CTA256x128x128, cluster1x1x1, two stages, FP8 E4M3 A/B,
+The minimal GEMM uses CTA256x128x128, cluster1x1x1, automatic stage selection, FP8 E4M3 A/B,
 FP32 scales/output, scale granularity128x64x128, and MN-major scales on both sides.
 A=B=1, A scales are2/4 across the two row bands, B scales are1/2 across the two column
 bands. The exact expected 128x64 blocks are `[[256,512],[512,1024]]`.
@@ -36,7 +36,7 @@ across M waves. The executable reports actual mismatches without accepting this
 prediction as the expected answer.
 
 `--all` checks one M wave, one B scale, multiple A scales per wave, unit A scales,
-multiple K tiles, stage wrap, K tail, two/three stages, partial M/N, padded leading
+multiple K tiles, stage wrap, K tail, automatic stages with two carveouts, partial M/N, padded leading
 strides, batching, and alpha/beta epilogue behavior. It compares every logical output
 and allocated D row-padding element with an independent integer block-product oracle.
 It does not yet cover other scale majors, clustering, pointer-array dispatch, or FP8 formats.
@@ -68,6 +68,6 @@ sanitizer findings. Confirmation must distinguish the internal maximum-scratch h
 from other ordering failures. Compare the original with a narrowly placed read-completion
 barrier, then revert it; delay-instrumented-only failures are diagnostic evidence.
 
-Both executables return0 only when all requested numerical checks pass,1 on numerical
-mismatch, and2 for invalid invocation, unsupported hardware, or CUDA/dispatch failure.
+Both executables return0 only when all requested numerical checks pass. Numerical
+mismatch returns1; invalid invocation, unsupported hardware, and execution errors fail with a nonzero exit.
 `--layouts` is a separate host-only diagnostic. No benchmark or full-library build is needed.

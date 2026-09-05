@@ -20,8 +20,10 @@ jobs:
         include:
           - source: fp8_scale_wave
             arch: sm_90a
+            virtual_arch: compute_90a
           - source: gqa_max_scratch
             arch: sm_100a
+            virtual_arch: compute_100a
     defaults:
       run:
         shell: bash
@@ -36,7 +38,8 @@ jobs:
         run: |
           set -o pipefail
           nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr \
-            -arch=${{ matrix.arch }} -Iinclude -Itools/util/include \
+            -gencode=arch=${{ matrix.virtual_arch }},code=${{ matrix.arch }} \
+            -Iinclude -Itools/util/include \
             -Iexamples/93_blackwell_low_latency_gqa \
             --keep --keep-dir build/correctness \
             test/regression/${{ matrix.source }}.cu \
