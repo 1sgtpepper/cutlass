@@ -1,0 +1,57 @@
+name: Kernel correctness validation
+
+on:
+  push:
+    branches: [validation/scale-and-gqa-correctness]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container:
+      image: nvidia/cuda:13.1.1-devel-ubuntu24.04@sha256:9cf8694a27722418a1f175d90f85d5afb5a728fd4a9907d7f0565efecfa14d32
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source: fp8_scale_wave
+            arch: sm_90a
+          - source: gqa_max_scratch
+            arch: sm_100a
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Record toolchain
+        run: |
+          mkdir -p build/correctness
+          nvcc --version | tee build/correctness/toolchain.txt
+          printf '%s\n' '${{ github.sha }}' > build/correctness/revision.txt
+      - name: Compile the unmodified kernel and standalone oracle
+        run: |
+          set -o pipefail
+          nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr \
+            -arch=${{ matrix.arch }} -Iinclude -Itools/util/include \
+            -Iexamples/93_blackwell_low_latency_gqa \
+            --keep --keep-dir build/correctness \
+            test/regression/${{ matrix.source }}.cu \
+            -o build/correctness/${{ matrix.source }} \
+            2>&1 | tee build/correctness/compile.log
+          cuobjdump --dump-sass build/correctness/${{ matrix.source }} > build/correctness/${{ matrix.source }}.sass
+      - name: Observe CuTe scale aliasing on the CPU
+        if: matrix.source == 'fp8_scale_wave'
+        run: |
+          set -o pipefail
+          build/correctness/fp8_scale_wave --layouts | tee build/correctness/layouts.txt
+      - name: Preserve validation artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.source }}-${{ github.sha }}
+          path: build/correctness/
+          retention-days: 14
