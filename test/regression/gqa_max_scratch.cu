@@ -17,7 +17,8 @@ void check(cudaError_t status) {
 }
 
 template<int Splits, int HeadDim = 64, int Stages = 3>
-bool run_case(char const* name, int length, int repetitions, bool equal_logits = false) {
+bool run_case(char const* name, int length, int repetitions, bool equal_logits = false,
+              bool constant_values = false) {
   using Element = cutlass::bfloat16_t;
   constexpr int kv_heads = 8;
   constexpr int local_heads = 8;
@@ -31,6 +32,28 @@ bool run_case(char const* name, int length, int repetitions, bool equal_logits =
     for (int token = 0; token < length; ++token) {
       k[(size_t(head) * length + token) * HeadDim] =
           Element(equal_logits ? 0.0f : float((token / 128) % 2));
+      if (!constant_values) {
+        for (int feature = 0; feature < HeadDim; ++feature) {
+          v[(size_t(head) * length + token) * HeadDim + feature] =
+              Element(0.25f * float((token / 128 + head + feature) % 7 - 3));
+        }
+      }
+    }
+  }
+  std::vector<float> expected(q.size());
+  for (int head = 0; head < q_heads; ++head) {
+    for (int feature = 0; feature < HeadDim; ++feature) {
+      double numerator = 0.0;
+      double denominator = 0.0;
+      for (int token = 0; token < length; ++token) {
+        // Independent scalar softmax oracle; Q/K produce base-2 logits 0 or 1.
+        double weight = std::exp2(equal_logits ? 0.0 : double((token / 128) % 2));
+        double value = constant_values ? 1.0 :
+            0.25 * double((token / 128 + head / local_heads + feature) % 7 - 3);
+        numerator += weight * value;
+        denominator += weight;
+      }
+      expected[head * HeadDim + feature] = float(Element(float(numerator / denominator)));
     }
   }
   cutlass::device_memory::allocation<Element> dq(q.size()), dk(k.size()), dv(v.size()), dout(out.size());
@@ -57,12 +80,13 @@ bool run_case(char const* name, int length, int repetitions, bool equal_logits =
     int mismatches = 0;
     for (size_t i = 0; i < out.size(); ++i) {
       float actual = float(out[i]);
-      // Softmax weights sum to one: V=1 makes every output 1 independently of Q/K.
-      // This fixture has power-of-two probabilities, avoiding a loose random-data tolerance.
-      if (!std::isfinite(actual) || actual != 1.0f) {
+      // Nonconstant values expose wrong relative attention weights. The absolute
+      // tolerance is one BF16 step at 0.5; the constant-value control stays exact.
+      float tolerance = constant_values ? 0.0f : 1.0f / 256.0f;
+      if (!std::isfinite(actual) || std::fabs(actual - expected[i]) > tolerance) {
         if (mismatches < 8)
-          std::printf("%s iteration=%d head=%zu feature=%zu actual=%g expected=1\n",
-                      name, iteration, i / HeadDim, i % HeadDim, actual);
+          std::printf("%s iteration=%d head=%zu feature=%zu actual=%g expected=%g tolerance=%g\n",
+                      name, iteration, i / HeadDim, i % HeadDim, actual, expected[i], tolerance);
         ++mismatches;
       }
     }
@@ -109,6 +133,7 @@ int main(int argc, char** argv) {
   }
   bool okay = run_case<1>("one-CTA-two-tiles", 256, repetitions);
   if (all) {
+    okay &= run_case<1>("constant-value-control", 256, repetitions, false, true);
     okay &= run_case<1>("one-CTA-one-tile", 128, repetitions);
     okay &= run_case<1>("equal-logits", 256, repetitions, true);
     okay &= run_case<8>("shipped-default", 2048, repetitions);

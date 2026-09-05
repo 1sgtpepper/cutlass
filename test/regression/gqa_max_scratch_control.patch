@@ -1,0 +1,10 @@
+--- a/examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh
++++ b/examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh
+@@ -462,6 +462,7 @@
+     acc = __shfl_sync(0xffffffff, acc, 0, 32);
+     out(i) = acc;
+   }
++  warp_reduce_barrier.arrive_and_wait();
+ }
+ 
+ // this function acts on the transposed tensor of the above cta_reduce function

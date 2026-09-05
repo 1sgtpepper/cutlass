@@ -28,33 +28,52 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Install patch tooling
+        run: apt-get update && apt-get install -y --no-install-recommends git
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Record toolchain
         run: |
           mkdir -p build/correctness
           nvcc --version | tee build/correctness/toolchain.txt
           printf '%s\n' '${{ github.sha }}' > build/correctness/revision.txt
-      - name: Compile the unmodified kernel and standalone oracle
+      - name: Prepare isolated causal controls
+        run: |
+          mkdir -p build/control
+          cp --parents include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized_fp8_blockwise_scaling.hpp build/control/
+          cp --parents examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh build/control/
+          git apply --directory=build/control test/regression/${{ matrix.source }}_control.patch
+          cp test/regression/${{ matrix.source }}_control.patch build/correctness/control.patch
+      - name: Compile baseline and causal control with the same oracle
         run: |
           set -o pipefail
-          nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr \
-            -gencode=arch=${{ matrix.virtual_arch }},code=${{ matrix.arch }} \
-            -Iinclude -Itools/util/include \
-            -Iexamples/93_blackwell_low_latency_gqa \
-            --keep --keep-dir build/correctness \
-            test/regression/${{ matrix.source }}.cu \
-            -o build/correctness/${{ matrix.source }} \
-            2>&1 | tee build/correctness/compile.log
-          cuobjdump --dump-sass build/correctness/${{ matrix.source }} > build/correctness/${{ matrix.source }}.sass
+          for variant in baseline control; do
+            output=build/correctness/$variant
+            mkdir -p "$output"
+            extra_includes=()
+            if [ "$variant" = control ]; then
+              extra_includes=(-Ibuild/control/include -Ibuild/control/examples/93_blackwell_low_latency_gqa)
+            fi
+            nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr \
+              -gencode=arch=${{ matrix.virtual_arch }},code=${{ matrix.arch }} \
+              "${extra_includes[@]}" -Iinclude -Itools/util/include \
+              -Iexamples/93_blackwell_low_latency_gqa \
+              --keep --keep-dir "$output" \
+              test/regression/${{ matrix.source }}.cu \
+              -o "$output/${{ matrix.source }}" \
+              2>&1 | tee "$output/compile.log"
+            cuobjdump --dump-sass "$output/${{ matrix.source }}" > "$output/kernel.sass"
+          done
       - name: Observe CuTe scale aliasing on the CPU
         if: matrix.source == 'fp8_scale_wave'
         run: |
           set -o pipefail
-          build/correctness/fp8_scale_wave --layouts | tee build/correctness/layouts.txt
-      - name: Preserve validation artifacts
+          build/correctness/baseline/fp8_scale_wave --layouts | tee build/correctness/layouts.txt
+      - name: Preserve validation evidence in the job log
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ${{ matrix.source }}-${{ github.sha }}
-          path: build/correctness/
-          retention-days: 14
+        run: |
+          find build/correctness -type f -exec sha256sum {} + > build/checksums.txt
+          tar -czf kernel-evidence.tar.gz build/correctness build/checksums.txt
+          sha256sum kernel-evidence.tar.gz
+          echo 'BEGIN_KERNEL_EVIDENCE_BASE64'
+          base64 -w 76 kernel-evidence.tar.gz
+          echo 'END_KERNEL_EVIDENCE_BASE64'

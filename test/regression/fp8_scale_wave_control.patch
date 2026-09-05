@@ -1,0 +1,48 @@
+--- a/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized_fp8_blockwise_scaling.hpp
++++ b/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized_fp8_blockwise_scaling.hpp
+@@ -939,13 +939,6 @@
+             filter_zeros(tCrSFA_local)(i) = filter_zeros(tCrSFA_local)(i) * scale_b;
+           }
+         }
+-        if constexpr (ScaleMsPerWave == 1 && ScaleNsPerTile  > 1) {
+-          ElementBlockScale scale_a = tCrSFA_local(_0{});
+-          CUTLASS_PRAGMA_UNROLL
+-          for (int i = 0; i < size(filter_zeros(tCrSFB_local)); i++) {
+-            filter_zeros(tCrSFB_local)(i) = filter_zeros(tCrSFB_local)(i) * scale_a;
+-          }
+-        }
+ 
+         warpgroup_wait<0>();
+         if (is_last) {
+@@ -962,7 +955,7 @@
+           scale_if_needed(accum_local, accumulation, tCrSFA_local);
+         }
+         if constexpr (ScaleMsPerWave == 1 && ScaleNsPerTile  > 1) {
+-          scale_if_needed(accum_local, accumulation, tCrSFB_local);
++          scale_if_needed(accum_local, accumulation, tCrSFA_local, tCrSFB_local);
+         }
+         if constexpr (ScaleMsPerWave  > 1 && ScaleNsPerTile  > 1) {
+           scale_if_needed(accum_local, accumulation, tCrSFA_local, tCrSFB_local);
+@@ -1029,13 +1022,6 @@
+             filter_zeros(tCrSFA_local)(i) = filter_zeros(tCrSFA_local)(i) * scale_b;
+           }
+         }
+-        if constexpr (ScaleMsPerWave == 1 && ScaleNsPerTile  > 1) {
+-          ElementBlockScale scale_a = tCrSFA_local(_0{});
+-          CUTLASS_PRAGMA_UNROLL
+-          for (int i = 0; i < size(filter_zeros(tCrSFB_local)); i++) {
+-            filter_zeros(tCrSFB_local)(i) = filter_zeros(tCrSFB_local)(i) * scale_a;
+-          }
+-        }
+         warpgroup_wait<0>();
+         if (is_last) {
+           pipeline.consumer_release(smem_pipe_release); // Unlock previous tile
+@@ -1049,7 +1035,7 @@
+           scale_if_needed(accum_local, accumulation, tCrSFA_local);
+         }
+         if constexpr (ScaleMsPerWave == 1 && ScaleNsPerTile  > 1) {
+-          scale_if_needed(accum_local, accumulation, tCrSFB_local);
++          scale_if_needed(accum_local, accumulation, tCrSFA_local, tCrSFB_local);
+         }
+         if constexpr (ScaleMsPerWave  > 1 && ScaleNsPerTile  > 1) {
+           scale_if_needed(accum_local, accumulation, tCrSFA_local, tCrSFB_local);
