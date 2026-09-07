@@ -107,9 +107,11 @@ bool run_case(char const* name, int length, int repetitions, bool equal_logits =
 
 int main(int argc, char** argv) {
   bool all = false;
+  bool mailboxes = false;
   int repetitions = 100;
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--all") == 0) all = true;
+    else if (std::strcmp(argv[i], "--mailboxes") == 0) mailboxes = true;
     else if (std::strcmp(argv[i], "--repetitions") == 0 && i + 1 < argc) {
       char* end{};
       long count = std::strtol(argv[++i], &end, 10);
@@ -120,7 +122,7 @@ int main(int argc, char** argv) {
       repetitions = int(count);
     }
     else {
-      std::fprintf(stderr, "usage: %s [--all] [--repetitions 1..10000]\n", argv[0]);
+      std::fprintf(stderr, "usage: %s [--all|--mailboxes] [--repetitions 1..10000]\n", argv[0]);
       return 2;
     }
   }
@@ -131,17 +133,25 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "This sm_100a executable requires an SM100 GPU; no test executed.\n");
     return 2;
   }
-  bool okay = run_case<1>("one-CTA-two-tiles", 256, repetitions);
+  bool okay = mailboxes || run_case<1>("one-CTA-two-tiles", 256, repetitions);
   if (all) {
     okay &= run_case<1>("constant-value-control", 256, repetitions, false, true);
     okay &= run_case<1>("one-CTA-one-tile", 128, repetitions);
     okay &= run_case<1>("equal-logits", 256, repetitions, true);
     okay &= run_case<8>("shipped-default", 2048, repetitions);
-    okay &= run_case<8>("one-tile-per-split", 1024, repetitions);
     okay &= run_case<1>("stage-wrap", 640, repetitions);
     okay &= run_case<1>("partial-tail", 656, repetitions);
     okay &= run_case<1,64,2>("two-stages", 640, repetitions);
     okay &= run_case<1,128>("head-dimension-128", 256, repetitions);
+  }
+  if (all || mailboxes) {
+    okay &= run_case<8>("all-active-splits", 1024, repetitions);
+    okay &= run_case<8>("one-active-split", 128, repetitions);
+    okay &= run_case<8>("two-active-splits", 256, repetitions);
+    okay &= run_case<8>("five-active-splits", 640, repetitions);
+    okay &= run_case<8>("six-active-partial-tail", 656, repetitions);
+    okay &= run_case<8,128>("all-active-head-128", 1024, repetitions);
+    okay &= run_case<8,128>("inactive-head-128", 256, repetitions);
   }
   return okay ? 0 : 1;
 }
