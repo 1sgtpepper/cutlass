@@ -1,0 +1,81 @@
+name: Compile FP8 and GQA fixes
+
+on:
+  push:
+    branches: [ci/fp8-gqa-fixes]
+    paths: [.github/workflows/fix-candidates.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container:
+      image: nvidia/cuda:13.1.1-devel-ubuntu24.04@sha256:9cf8694a27722418a1f175d90f85d5afb5a728fd4a9907d7f0565efecfa14d32
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - revision: 56e8bdf0f4655e4c93e3b6959d9fcb5c852788bb
+            fixture: fp8_scale_wave
+            arch: 90a
+            target: cutlass_test_unit_gemm_device_tensorop_sm90_blockwise
+            tests: "ON"
+            examples: "OFF"
+          - revision: 246e9206cc1dce351fb8a90496effefdc86598a9
+            fixture: gqa_max_scratch
+            arch: 100a
+            target: 93_blackwell_low_latency_gqa
+            tests: "OFF"
+            examples: "ON"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install build tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git cmake ninja-build
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.revision }}
+          path: source
+      - name: Compile the repository regression target
+        run: |
+          mkdir -p evidence
+          git -C source rev-parse HEAD | tee evidence/revision.txt
+          test "$(git -C source rev-parse HEAD)" = "${{ matrix.revision }}"
+          nvcc --version | tee evidence/toolchain.txt
+          cmake -S source -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCUTLASS_NVCC_ARCHS=${{ matrix.arch }} \
+            -DCUTLASS_ENABLE_LIBRARY=OFF -DCUTLASS_ENABLE_PROFILER=OFF \
+            -DCUTLASS_ENABLE_TESTS=${{ matrix.tests }} \
+            -DCUTLASS_ENABLE_EXAMPLES=${{ matrix.examples }}
+          cmake --build build --target ${{ matrix.target }} --parallel 2 2>&1 | tee evidence/build.log
+      - name: Compile the existing numerical fixture against the exact fix
+        run: |
+          nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr \
+            -gencode=arch=compute_${{ matrix.arch }},code=sm_${{ matrix.arch }} \
+            -Isource/include -Isource/tools/util/include \
+            -Isource/examples/93_blackwell_low_latency_gqa \
+            --ptxas-options=-v test/regression/${{ matrix.fixture }}.cu \
+            -o evidence/${{ matrix.fixture }} 2>&1 | tee evidence/fixture-compile.log
+          cuobjdump --dump-sass evidence/${{ matrix.fixture }} > evidence/kernel.sass
+          git -C source diff --exit-code
+      - name: Inspect actual scale layouts on the CPU
+        if: matrix.fixture == 'fp8_scale_wave'
+        run: evidence/fp8_scale_wave --layouts | tee evidence/layouts.txt
+      - name: Preserve compile evidence
+        if: always()
+        run: |
+          mkdir -p evidence
+          find evidence -type f -exec sha256sum {} + > checksums.txt
+          cat checksums.txt
+          tar -czf checks.tar.gz evidence checksums.txt
+          echo BEGIN_CHECKS_BASE64
+          base64 -w 76 checks.tar.gz
+          echo END_CHECKS_BASE64
