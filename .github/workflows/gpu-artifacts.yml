@@ -1,0 +1,91 @@
+name: Prepare FP8 and GQA execution artifacts
+
+on:
+  push:
+    branches: [ci/fp8-gqa-fixes]
+    paths: [.github/workflows/gpu-artifacts.yml, test/regression/fp8_scale_wave.cu]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container:
+      image: nvidia/cuda:13.1.1-devel-ubuntu24.04@sha256:9cf8694a27722418a1f175d90f85d5afb5a728fd4a9907d7f0565efecfa14d32
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - revision: 56e8bdf0f4655e4c93e3b6959d9fcb5c852788bb
+            fixture: fp8_scale_wave
+            header: include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized_fp8_blockwise_scaling.hpp
+            arch: 90a
+            target: cutlass_test_unit_gemm_device_tensorop_sm90_blockwise
+            tests: "ON"
+            examples: "OFF"
+          - revision: 246e9206cc1dce351fb8a90496effefdc86598a9
+            fixture: gqa_max_scratch
+            header: examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh
+            arch: 100a
+            target: 93_blackwell_low_latency_gqa
+            tests: "OFF"
+            examples: "ON"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git cmake ninja-build python3
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.revision }}
+          fetch-depth: 2
+          path: source
+      - name: Build both headers with the same test and toolchain
+        run: |
+          mkdir -p evidence
+          nvcc --version > evidence/toolchain.txt
+          git -C source rev-parse HEAD > evidence/fix-revision.txt
+          test "$(git -C source rev-parse HEAD)" = "${{ matrix.revision }}"
+          cmake -S source -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCUTLASS_NVCC_ARCHS=${{ matrix.arch }} \
+            -DCUTLASS_ENABLE_LIBRARY=OFF -DCUTLASS_ENABLE_PROFILER=OFF \
+            -DCUTLASS_ENABLE_TESTS=${{ matrix.tests }} \
+            -DCUTLASS_ENABLE_EXAMPLES=${{ matrix.examples }}
+          for variant in baseline fix; do
+            revision=59e3a3338d516ca6ce0e073af8da65289678a35c
+            if [ "$variant" = fix ]; then revision=${{ matrix.revision }}; fi
+            output=evidence/$variant
+            mkdir -p "$output"
+            git -C source show "$revision:${{ matrix.header }}" > "source/${{ matrix.header }}"
+            sha256sum "source/${{ matrix.header }}" > "$output/header.sha256"
+            git -C source diff > "$output/source.diff"
+            cmake --build build --target ${{ matrix.target }} --parallel 2 2>&1 | tee "$output/build.log"
+            mapfile -t binaries < <(find build -type f -name '${{ matrix.target }}')
+            test "${#binaries[@]}" -eq 1
+            cp "${binaries[0]}" "$output/repository-test"
+            nvcc -std=c++17 -O3 -lineinfo --expt-relaxed-constexpr \
+              -gencode=arch=compute_${{ matrix.arch }},code=sm_${{ matrix.arch }} \
+              -Isource/include -Isource/tools/util/include \
+              -Isource/examples/93_blackwell_low_latency_gqa \
+              --ptxas-options=-v test/regression/${{ matrix.fixture }}.cu \
+              -o "$output/${{ matrix.fixture }}" 2>&1 | tee "$output/fixture-compile.log"
+          done
+          git -C source diff --exit-code
+          cp test/regression/${{ matrix.fixture }}.cu evidence/
+          find evidence -type f -exec sha256sum {} + > checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.fixture }}-execution
+          path: |
+            evidence
+            checksums.txt
+          compression-level: 1
+          retention-days: 1
+          if-no-files-found: error

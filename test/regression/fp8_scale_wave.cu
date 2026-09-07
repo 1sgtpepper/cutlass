@@ -100,7 +100,7 @@ int inspect_layouts() {
 template<int TileM = 256, int GranM = 128, int GranN = 64, int ExtraCarveout = 0>
 bool run_case(char const* name, int M, int N, int K, int L = 1,
               bool unit_a = false, bool padded = false,
-              float alpha = 1.0f, float beta = 0.0f) {
+              float alpha = 1.0f, float beta = 0.0f, bool benchmark = false) {
   using Config = Configuration<TileM, GranM, GranN, ExtraCarveout>;
   using Gemm = typename Config::Gemm;
   using Kernel = typename Config::Kernel;
@@ -177,6 +177,36 @@ bool run_case(char const* name, int M, int N, int K, int L = 1,
   std::printf("%s tile=%dx128x128 scale=%dx%dx128 stages=%d problem=%dx%dx%dx%d mismatches=%d %s\n",
       name, TileM, GranM, GranN, Config::Mainloop::DispatchPolicy::Stages,
       M, N, K, L, mismatches, mismatches ? "FAIL" : "PASS");
+  if (benchmark) {
+    // Capture only device work, keeping allocation and the host oracle outside timing.
+    cudaStream_t stream;
+    cudaGraph_t graph;
+    cudaGraphExec_t executable;
+    cudaEvent_t begin, end;
+    check(cudaStreamCreate(&stream));
+    check(cudaEventCreate(&begin));
+    check(cudaEventCreate(&end));
+    check(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+    for (int i = 0; i < 100; ++i) check(gemm.run(stream));
+    check(cudaStreamEndCapture(stream, &graph));
+    check(cudaGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+    check(cudaGraphLaunch(executable, stream));
+    check(cudaStreamSynchronize(stream));
+    for (int sample = 0; sample < 5; ++sample) {
+      check(cudaEventRecord(begin, stream));
+      check(cudaGraphLaunch(executable, stream));
+      check(cudaEventRecord(end, stream));
+      check(cudaEventSynchronize(end));
+      float milliseconds;
+      check(cudaEventElapsedTime(&milliseconds, begin, end));
+      std::printf("TIMING %s sample=%d us=%g\n", name, sample, milliseconds * 10.0f);
+    }
+    check(cudaGraphExecDestroy(executable));
+    check(cudaGraphDestroy(graph));
+    check(cudaEventDestroy(begin));
+    check(cudaEventDestroy(end));
+    check(cudaStreamDestroy(stream));
+  }
   return mismatches == 0;
 }
 
@@ -184,9 +214,10 @@ bool run_case(char const* name, int M, int N, int K, int L = 1,
 
 int main(int argc, char** argv) {
   if (argc == 2 && std::strcmp(argv[1], "--layouts") == 0) return inspect_layouts();
+  bool benchmark = argc == 2 && std::strcmp(argv[1], "--benchmark") == 0;
   bool all = argc == 2 && std::strcmp(argv[1], "--all") == 0;
-  if (argc > 1 && !all) {
-    std::fprintf(stderr, "usage: %s [--layouts|--all]\n", argv[0]);
+  if (argc > 1 && !all && !benchmark) {
+    std::fprintf(stderr, "usage: %s [--layouts|--all|--benchmark]\n", argv[0]);
     return 2;
   }
   cudaDeviceProp prop{};
@@ -195,6 +226,13 @@ int main(int argc, char** argv) {
   if (prop.major != 9 || prop.minor != 0) {
     std::fprintf(stderr, "This executable requires an SM90 Hopper GPU; no test executed.\n");
     return 2;
+  }
+  if (benchmark) {
+    bool okay = run_case("drain", 1024, 1024, 128, 1, false, false, 1, 0, true);
+    okay &= run_case("multi-K", 1024, 1024, 512, 1, false, false, 1, 0, true);
+    okay &= run_case<128,128,64>("one-wave", 1024, 1024, 512, 1, false, false, 1, 0, true);
+    okay &= run_case<256,128,128>("one-B-scale", 1024, 1024, 512, 1, false, false, 1, 0, true);
+    return okay ? 0 : 1;
   }
   bool okay = run_case("minimal", 256, 128, 128);
   if (all) {
