@@ -19,6 +19,7 @@ void check(cudaError_t status) {
 template<int Splits, int HeadDim = 64, int Stages = 3>
 bool run_case(char const* name, int length, int repetitions, bool equal_logits = false,
               bool constant_values = false) {
+  static_assert(Splits > 1, "st.async requires a cluster with more than one CTA");
   using Element = cutlass::bfloat16_t;
   constexpr int kv_heads = 8;
   constexpr int local_heads = 8;
@@ -133,16 +134,16 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "This sm_100a executable requires an SM100 GPU; no test executed.\n");
     return 2;
   }
-  bool okay = mailboxes || run_case<1>("one-CTA-two-tiles", 256, repetitions);
+  bool okay = mailboxes || run_case<2>("two-CTAs-two-tiles-each", 512, repetitions);
   if (all) {
-    okay &= run_case<1>("constant-value-control", 256, repetitions, false, true);
-    okay &= run_case<1>("one-CTA-one-tile", 128, repetitions);
-    okay &= run_case<1>("equal-logits", 256, repetitions, true);
+    okay &= run_case<2>("constant-value-control", 512, repetitions, false, true);
+    okay &= run_case<2>("one-active-CTA-one-tile", 128, repetitions);
+    okay &= run_case<2>("equal-logits", 512, repetitions, true);
     okay &= run_case<8>("shipped-default", 2048, repetitions);
-    okay &= run_case<1>("stage-wrap", 640, repetitions);
-    okay &= run_case<1>("partial-tail", 656, repetitions);
-    okay &= run_case<1,64,2>("two-stages", 640, repetitions);
-    okay &= run_case<1,128>("head-dimension-128", 256, repetitions);
+    okay &= run_case<2>("stage-wrap", 1280, repetitions);
+    okay &= run_case<2>("partial-tail", 1312, repetitions);
+    okay &= run_case<2,64,2>("two-stages", 640, repetitions);
+    okay &= run_case<2,128>("head-dimension-128", 512, repetitions);
   }
   if (all || mailboxes) {
     okay &= run_case<8>("all-active-splits", 1024, repetitions);

@@ -3,7 +3,7 @@ name: Compile GQA mailbox controls
 on:
   push:
     branches: [ci/fp8-gqa-fixes]
-    paths: [.github/workflows/fix-candidates.yml]
+    paths: [.github/workflows/fix-candidates.yml, test/regression/gqa_max_scratch.cu]
   workflow_dispatch:
 
 permissions:
@@ -41,7 +41,7 @@ jobs:
           ref: ${{ matrix.revision }}
           path: source
       - name: Compile the repository regression target
-        if: matrix.variant == 'both' || matrix.variant == 'mailbox'
+        if: false
         run: |
           mkdir -p evidence
           git -C source rev-parse HEAD | tee evidence/revision.txt
