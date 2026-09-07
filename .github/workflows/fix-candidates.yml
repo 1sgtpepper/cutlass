@@ -38,7 +38,7 @@ jobs:
       - name: Install build tooling
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git cmake ninja-build
+          apt-get install -y --no-install-recommends git cmake ninja-build python3
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
