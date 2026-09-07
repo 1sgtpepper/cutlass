@@ -34,7 +34,7 @@ jobs:
       - name: Install build tooling
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git python3
+          apt-get install -y --no-install-recommends git
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
