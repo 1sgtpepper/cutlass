@@ -34,25 +34,12 @@ jobs:
       - name: Install build tooling
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git cmake ninja-build python3
+          apt-get install -y --no-install-recommends git python3
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.revision }}
           path: source
-      - name: Compile the repository regression target
-        if: false
-        run: |
-          mkdir -p evidence
-          git -C source rev-parse HEAD | tee evidence/revision.txt
-          test "$(git -C source rev-parse HEAD)" = "$(git -C source rev-parse '${{ matrix.revision }}')"
-          nvcc --version | tee evidence/toolchain.txt
-          cmake -S source -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCUTLASS_NVCC_ARCHS=100a \
-            -DCUTLASS_ENABLE_LIBRARY=OFF -DCUTLASS_ENABLE_PROFILER=OFF \
-            -DCUTLASS_ENABLE_TESTS=OFF -DCUTLASS_ENABLE_EXAMPLES=ON
-          cmake --build build --target 93_blackwell_low_latency_gqa --parallel 2 2>&1 | tee evidence/build.log
-          cp build/examples/93_blackwell_low_latency_gqa/93_blackwell_low_latency_gqa evidence/repository-test
       - name: Compile the existing numerical fixture against the exact fix
         run: |
           mkdir -p evidence
