@@ -292,7 +292,8 @@ TEST(SM90_Device_Gemm_e4m3t_e4m3n_e4m3t_tensorop_f32_align16_blockwise, 128x128x
 
 }
 
-TEST(SM90_Device_Gemm_e4m3t_e4m3n_e4m3t_tensorop_f32_align16_blockwise, 256x128x128_1x1x1_128x64x128_scale) {
+TEST(SM90_Device_Gemm_e4m3t_e4m3n_e4m3t_tensorop_f32_align16_blockwise,
+     256x128x128_1x1x1_128x64x128_scale) {
   bool passed = groupwise_test<cute::GMMA::Major::MN, cute::GMMA::Major::MN>(
       Int<128>{}, Int<64>{}, Int<128>{},
       cutlass::layout::RowMajor{}, cutlass::layout::ColumnMajor{},
