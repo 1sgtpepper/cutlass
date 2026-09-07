@@ -19,18 +19,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - revision: 56e8bdf0f4655e4c93e3b6959d9fcb5c852788bb
+          - revision: b9c6c6ad7af1fbf01a15d13afae5dc51af302c50
             fixture: fp8_scale_wave
             arch: 90a
             target: cutlass_test_unit_gemm_device_tensorop_sm90_blockwise
             tests: "ON"
             examples: "OFF"
-          - revision: 246e9206cc1dce351fb8a90496effefdc86598a9
-            fixture: gqa_max_scratch
-            arch: 100a
-            target: 93_blackwell_low_latency_gqa
-            tests: "OFF"
-            examples: "ON"
     defaults:
       run:
         shell: bash
