@@ -1,0 +1,74 @@
+name: Validate retained GQA regressions
+on:
+  push:
+    branches: [validation/gqa-regression-ci]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container:
+      image: nvidia/cuda:13.1.1-devel-ubuntu24.04@sha256:9cf8694a27722418a1f175d90f85d5afb5a728fd4a9907d7f0565efecfa14d32
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - revision: bfd19ec53d8c23bd6c7d39e8689da58a63a38726
+            variant: scratch-fixed
+            target: 93_blackwell_low_latency_gqa_cta_reduce
+            revert: false
+          - revision: bfd19ec53d8c23bd6c7d39e8689da58a63a38726
+            variant: scratch-original
+            target: 93_blackwell_low_latency_gqa_cta_reduce
+            revert: true
+          - revision: d24fd30bf402b7fa8716ec9767ff5216ad63b7a0
+            variant: mailbox-fixed
+            target: 93_blackwell_low_latency_gqa_mailboxes
+            revert: false
+          - revision: d24fd30bf402b7fa8716ec9767ff5216ad63b7a0
+            variant: mailbox-original
+            target: 93_blackwell_low_latency_gqa_mailboxes
+            revert: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install build tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git cmake ninja-build
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.revision }}
+      - name: Compile registered target and original-code control
+        env:
+          REVERT_SOURCE: ${{ matrix.revert }}
+          TARGET: ${{ matrix.target }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          mkdir evidence
+          git rev-parse HEAD > evidence/revision.txt
+          git diff --check
+          if [ "$REVERT_SOURCE" = true ]; then
+            git fetch --depth=1 --no-tags origin 59e3a3338d516ca6ce0e073af8da65289678a35c
+            git show 59e3a3338d516ca6ce0e073af8da65289678a35c:examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh > examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh
+          fi
+          cmake -S . -B build -G Ninja -DCUTLASS_NVCC_ARCHS=100a -DCUTLASS_ENABLE_TESTS=OFF -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_CUBLAS=OFF -DCUTLASS_ENABLE_CUDNN=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_FLAGS=-lineinfo
+          cmake --build build --target "$TARGET" --parallel 2
+          cp "build/examples/93_blackwell_low_latency_gqa/$TARGET" "evidence/$VARIANT"
+          cp examples/93_blackwell_low_latency_gqa/test_*.cu evidence/
+          sha256sum examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh > evidence/source.sha256
+          git restore examples/93_blackwell_low_latency_gqa/tgv_gqa.cuh
+          git diff --exit-code
+      - name: Preserve compile evidence
+        if: always()
+        run: |
+          mkdir -p evidence
+          find evidence -type f -exec sha256sum {} + > checksums.txt
+          cat checksums.txt
+          tar -czf checks.tar.gz evidence checksums.txt
+          echo BEGIN_CHECKS_BASE64
+          base64 -w 76 checks.tar.gz
+          echo END_CHECKS_BASE64
