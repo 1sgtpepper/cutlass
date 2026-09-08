@@ -15,19 +15,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - revision: bfd19ec53d8c23bd6c7d39e8689da58a63a38726
-            variant: scratch-fixed
-            target: 93_blackwell_low_latency_gqa_cta_reduce
-            revert: false
-          - revision: bfd19ec53d8c23bd6c7d39e8689da58a63a38726
-            variant: scratch-original
-            target: 93_blackwell_low_latency_gqa_cta_reduce
-            revert: true
-          - revision: d24fd30bf402b7fa8716ec9767ff5216ad63b7a0
+          - revision: 763bd5fbbee523011f97f5963125bd613e0ef982
             variant: mailbox-fixed
             target: 93_blackwell_low_latency_gqa_mailboxes
             revert: false
-          - revision: d24fd30bf402b7fa8716ec9767ff5216ad63b7a0
+          - revision: 763bd5fbbee523011f97f5963125bd613e0ef982
             variant: mailbox-original
             target: 93_blackwell_low_latency_gqa_mailboxes
             revert: true
