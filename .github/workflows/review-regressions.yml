@@ -48,6 +48,7 @@ jobs:
           TARGET: ${{ matrix.target }}
           VARIANT: ${{ matrix.variant }}
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir evidence
           git rev-parse HEAD > evidence/revision.txt
           git diff --check
