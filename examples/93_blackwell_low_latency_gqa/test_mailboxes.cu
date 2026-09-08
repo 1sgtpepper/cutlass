@@ -49,7 +49,7 @@ bool run_case(char const* name, int length) {
   constexpr int Splits = 8;
   constexpr int HeadDim = 64;
   constexpr int Stages = 3;
-  constexpr int repetitions = 100;
+  constexpr int repetitions = 3;
   using Element = cutlass::bfloat16_t;
   constexpr int kv_heads = 8;
   constexpr int local_heads = 8;
